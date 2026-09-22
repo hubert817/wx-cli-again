@@ -4,9 +4,19 @@ use std::path::{Path, PathBuf};
 
 /// 产品统一推荐：补齐/重提数据库密钥（含冷分片 hook）。
 /// 所有用户可见错误/警告应指向此命令，避免 `init --force` 与 `key extract` 分叉。
+///
+/// Windows 没有 sudo（即使启用了 Win11 内置 sudo 也不是这里的预期用法），
+/// 提示用户在管理员 PowerShell 中直接运行。
+#[cfg(windows)]
+pub const RECOMMENDED_KEY_EXTRACT: &str = "wx key extract --hook-seconds 90";
+#[cfg(not(windows))]
 pub const RECOMMENDED_KEY_EXTRACT: &str = "sudo wx key extract --hook-seconds 90";
 
 /// 带冷分片操作说明的完整提示（一行或多行均可嵌入）。
+#[cfg(windows)]
+pub const RECOMMENDED_KEY_EXTRACT_HINT: &str =
+    "wx key extract --hook-seconds 90（管理员 PowerShell 运行；等待期间在微信中打开相关聊天以捕获冷分片密钥）";
+#[cfg(not(windows))]
 pub const RECOMMENDED_KEY_EXTRACT_HINT: &str =
     "sudo wx key extract --hook-seconds 90（等待期间在微信中打开相关聊天以捕获冷分片密钥）";
 
@@ -16,11 +26,10 @@ mod recommended_cmd_tests {
 
     #[test]
     fn recommended_key_extract_is_key_cmd_with_hook() {
-        assert!(RECOMMENDED_KEY_EXTRACT.starts_with("sudo wx key extract"));
+        assert!(RECOMMENDED_KEY_EXTRACT.contains("wx key extract"));
         assert!(RECOMMENDED_KEY_EXTRACT.contains("--hook-seconds"));
         assert!(!RECOMMENDED_KEY_EXTRACT.contains("init --force"));
-        assert!(RECOMMENDED_KEY_EXTRACT_HINT.contains(RECOMMENDED_KEY_EXTRACT)
-            || RECOMMENDED_KEY_EXTRACT_HINT.starts_with("sudo wx key extract"));
+        assert!(RECOMMENDED_KEY_EXTRACT_HINT.contains(RECOMMENDED_KEY_EXTRACT));
         assert!(!RECOMMENDED_KEY_EXTRACT_HINT.contains("init --force"));
     }
 }
@@ -37,7 +46,19 @@ pub struct Config {
 /// 从当前工作目录 / <exe_dir> / $HOME/.wx-cli 加载配置
 pub fn load_config() -> Result<Config> {
     let config_path = find_config_file()?;
-    let content = std::fs::read_to_string(&config_path)
+    load_config_from(&config_path)
+}
+
+/// daemon 专用：忽略 CWD，从 $HOME/.wx-cli（其次 exe 同目录）加载。
+///
+/// daemon 由 CLI 在任意目录 spawn（包括管理员 PowerShell 默认的 system32），
+/// CWD 优先会解析到无关位置的 config.json，导致启动失败。
+pub fn load_config_for_daemon() -> Result<Config> {
+    load_config_from(&daemon_config_path())
+}
+
+fn load_config_from(config_path: &Path) -> Result<Config> {
+    let content = std::fs::read_to_string(config_path)
         .with_context(|| format!("读取 config.json 失败: {}", config_path.display()))?;
     let raw: serde_json::Value =
         serde_json::from_str(&content).with_context(|| "config.json 格式错误")?;
@@ -137,6 +158,24 @@ fn default_config_path(
 
 fn config_path_in_dir(dir: &Path) -> PathBuf {
     dir.join("config.json")
+}
+
+/// daemon 的 config.json 查找顺序：$HOME/.wx-cli 优先，其次 exe 同目录（便携模式），不读 CWD。
+fn daemon_config_path() -> PathBuf {
+    let home = home_config_path(&cli_home_dir());
+    if home.exists() {
+        return home;
+    }
+    if let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(PathBuf::from))
+    {
+        let in_exe = config_path_in_dir(&exe_dir);
+        if in_exe.exists() {
+            return in_exe;
+        }
+    }
+    home
 }
 
 fn home_config_path(home_dir: &Path) -> PathBuf {

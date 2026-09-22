@@ -67,8 +67,8 @@ async fn async_run() -> Result<()> {
 
     eprintln!("[daemon] wx-daemon 启动 (PID {})", pid);
 
-    // 加载配置
-    let cfg = config::load_config()?;
+    // 加载配置（daemon 忽略 CWD，固定从 ~/.wx-cli 解析，见 load_config_for_daemon）
+    let cfg = config::load_config_for_daemon()?;
     eprintln!("[daemon] DB_DIR: {}", cfg.db_dir.display());
 
     // 加载密钥

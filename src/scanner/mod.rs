@@ -72,6 +72,32 @@ pub fn scan_keys_with_options(db_dir: &Path, opts: ScanOptions<'_>) -> Result<Ve
     }
 }
 
+/// doctor 展示用：找一个正在运行的微信进程 PID。
+///
+/// Windows 枚举 Weixin.exe（4.x 进程名）；macOS/Linux 沿用 pgrep WeChat。
+pub fn find_wechat_pid() -> Option<u32> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::find_wechat_pids().into_iter().min()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let out = std::process::Command::new("pgrep")
+            .args(["-x", "WeChat"])
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .next()?
+            .trim()
+            .parse()
+            .ok()
+    }
+}
+
 /// 读取 DB 文件前 16 字节作为 salt（hex），如果是明文 SQLite 则返回 None
 pub fn read_db_salt(path: &Path) -> Option<String> {
     let mut buf = [0u8; 16];

@@ -3,6 +3,7 @@
 use anyhow::Result;
 use serde_json::json;
 use std::path::Path;
+#[cfg(target_os = "macos")]
 use std::process::Command;
 
 use crate::config;
@@ -67,7 +68,7 @@ fn run_checks() -> Vec<Check> {
     let mut out = Vec::new();
 
     // WeChat process
-    let wechat_pid = find_wechat_pid();
+    let wechat_pid = scanner::find_wechat_pid();
     out.push(Check {
         name: "WeChat 进程".into(),
         ok: wechat_pid.is_some(),
@@ -279,13 +280,16 @@ fn run_checks() -> Vec<Check> {
         });
     }
 
-    // daemon sock
+    // daemon（Unix: socket ping；Windows: named pipe ping——两者都没有可探测的文件）
+    let daemon_alive = crate::cli::transport::is_alive();
     let sock = config::sock_path();
     out.push(Check {
-        name: "daemon socket".into(),
-        ok: sock.exists(),
-        detail: if sock.exists() {
-            sock.display().to_string()
+        name: "daemon".into(),
+        ok: daemon_alive,
+        detail: if daemon_alive {
+            "运行中".into()
+        } else if sock.exists() {
+            format!("{} 存在但无响应", sock.display())
         } else {
             "未运行（首次查询会自动启动）".into()
         },
@@ -336,19 +340,6 @@ fn format_missing_preview(items: &[scanner::MissingDb], max: usize) -> String {
     } else {
         parts.join(", ")
     }
-}
-
-fn find_wechat_pid() -> Option<u32> {
-    let out = Command::new("pgrep").args(["-x", "WeChat"]).output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .next()?
-        .trim()
-        .parse()
-        .ok()
 }
 
 fn read_key_for(keys_path: &Path, rel: &str) -> Option<String> {
